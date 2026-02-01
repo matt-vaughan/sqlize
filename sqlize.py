@@ -10,7 +10,7 @@ import time
 DB_NAME = "temp.db"
 
 """
-Sqlize is the metaclass you use when making a class
+Sqlize is the metaclass you use when making a class that you want to persist in a table
 For all of your parameters to __init__ for your class, there will be a field
 in the database. The table will automatically be generated, so will the entries,
 and updates can be pushed automatically with the use of the Bind class
