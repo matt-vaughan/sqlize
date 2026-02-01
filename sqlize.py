@@ -38,14 +38,18 @@ class Atomic(type):
         return result
     
 class AtomicSqlTable(metaclass=Atomic):
-    def __init__(self, table, fields):
+    def __init__(self, table, fields, replace=False):
         self.table = table
         self.fields = fields
         cursor = self.__class__._database.cursor()
+        
+        if replace:
+            self.__class__.query(f'DROP TABLE IF EXISTS {table}')
+
         query = f'''
         CREATE TABLE IF NOT EXISTS {table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        {", ".join([f"{field} TEXT" for field in fields])}
+        {", ".join([f"{field} {type}" for field, type in fields])}
         )
         '''
         self.__class__.query(query, ())
@@ -75,6 +79,14 @@ class AtomicSqlTable(metaclass=Atomic):
             where, params, _, _ = self.valuesAndParams(keyvals)
             query = f'SELECT * FROM {self.table} WHERE {where}'
             return self.__class__.query(query, params)
+        
+    def __getitem__(self, key):
+        if isinstance(key,int):
+            return self.get(id=key,keyvals=None)
+        elif isinstance(key,dict):
+            return self.get(id=None,keyvals=key)
+        else:
+            raise TypeError(f"Expected int or dict as argument, {type(key)} received")
 
 def tuple_flatten(lst):
     return ( *lst ,) 
