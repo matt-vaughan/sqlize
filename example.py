@@ -1,5 +1,12 @@
+import hashlib
+import secrets
+import sqlite3
+import time
 from sqlize import Sqlize, Bind
 
+"""
+Class initizer parameters all get a row in the database
+"""
 class Login(metaclass=Sqlize):
     def __init__(self, date, userid, success):
         self.date = date

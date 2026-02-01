@@ -1,3 +1,4 @@
+from abc import ABC
 import hashlib
 import secrets
 import sqlite3
@@ -6,11 +7,78 @@ import functools
 import inspect
 import time
 
+DB_NAME = "temp.db"
+
+"""
+Sqlize is the metaclass you use when making a class
+For all of your parameters to __init__ for your class, there will be a field
+in the database. The table will automatically be generated, so will the entries,
+and updates can be pushed automatically with the use of the Bind class
+
+OR
+
+Use AtomicSqlTable to 
+"""
+class Atomic(type):
+    _database = None
+    def __new__(cls, name, bases, dct):
+        if not cls._database:
+            cls._database = sqlite3.connect(DB_NAME)    
+        return super().__new__(cls, name, bases, dct)
+    
+    @classmethod
+    def query(cls, query, params=None):
+        cursor = cls._database.cursor()
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        result = cursor.fetchall()
+        cursor.close()
+        return result
+    
+class AtomicSqlTable(metaclass=Atomic):
+    def __init__(self, table, fields):
+        self.table = table
+        self.fields = fields
+        cursor = self.__class__._database.cursor()
+        query = f'''
+        CREATE TABLE IF NOT EXISTS {table} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        {", ".join([f"{field} TEXT" for field in fields])}
+        )
+        '''
+        self.__class__.query(query, ())
+
+    def valuesAndParams(self, keyvals : dict):
+        where = " AND ".join([f"{k}=?" for k in keyvals.keys()])
+        params = [v for v in keyvals.values()]
+        keys = ",".join([f"{k}" for k in keyvals.keys()])
+        qmarks = ",".join([f"?" for _ in keyvals.keys()])
+        return where, ( *params , ), keys, qmarks
+    
+    def new(self, keyvals):
+        _, params, keys, qmarks = self.valuesAndParams(keyvals)
+        query = f'INSERT OR IGNORE INTO {self.table} ({keys}) VALUES ({qmarks})'
+        return self.__class__.query(query, params)
+
+    def update(self, id, key, value):
+        query = f'UPDATE {self.table} SET {key}=? WHERE id = ?'
+        result = self.__class__.query(query, (value, id))
+        return result
+    
+    def get(self, id=None, keyvals=None):
+        if id:
+            query = f'SELECT * FROM {self.table} WHERE id=?'
+            return self.query(query, (id))
+        elif keyvals:
+            where, params, _, _ = self.valuesAndParams(keyvals)
+            query = f'SELECT * FROM {self.table} WHERE {where}'
+            return self.__class__.query(query, params)
 
 def tuple_flatten(lst):
     return ( *lst ,) 
 
-print( tuple_flatten([4,3,2,(1),0]) )
 def andComb( lst ):
     if lst == []:
         return ""
@@ -63,15 +131,19 @@ class Sqlize(type):
     _database = None
     def __new__(cls, name, bases, dct):
         if not cls._database:
-            cls._database = sqlite3.connect('temp.db')
+            cls._database = sqlite3.connect(DB_NAME)
         
+        # get the arguments to __init__
         sig = inspect.signature(dct['__init__'])
-        fields = [name for name, parameter in sig.parameters.items() if name != "self"]
+        fields = [name for name, _ in sig.parameters.items() if name != "self" and name != "args" and name != "kwargs"]
+        
+        # make the table if it's not in the db
         cls.make(name.lower()+"s", fields)
         
         return super().__new__(cls, name, bases, dct)
         
-    
+    # generate a list of regular class instances for each row in the database
+    # leave as instance method due to invokation specifics
     def items(self):
         cls = self.__class__
         sig = inspect.signature(self.__init__)
@@ -91,14 +163,15 @@ class Sqlize(type):
         
         return items
     
+    # make the database table if it dpes not exists
     @classmethod
     def make(cls, table, fields):
         cursor = cls._database.cursor()
-        cursor.execute(f'DROP TABLE IF EXISTS {table}')
+        params = ", ".join([f"{field} TEXT" for field in fields])
         cursor.execute(f'''
                         CREATE TABLE IF NOT EXISTS {table} (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        {", ".join([f"{field} TEXT" for field in fields])}
+                        {params}
                         )
                         ''')
         cursor.close()
@@ -123,7 +196,6 @@ class Sqlize(type):
         values = (*[v for _, v in key_values],)
         cursor = cls._database.cursor()
         query = f'''SELECT * FROM {table} WHERE ''' + " AND ".join(keys)
-        print(query)
         cursor.execute(query, values)
         return cursor.fetchall()
     
@@ -144,121 +216,3 @@ class Sqlize(type):
         cursor = cls._database.cursor()
         cursor.execute(query, (*[v for _,v in key_values], id))
         
-
-class Login(metaclass=Sqlize):
-    def __init__(self, date, userid, success):
-        self.date = date
-        self.userid = userid
-        self.success = success
-        
-        entries = Login.entries("logins", [('date',date),('userid',userid),('success',success)])
-        if not entries or entries == []:
-            self.id, _ = Login.insert("logins", [('date',date),('userid',userid),('success',success)])
-        else:
-            self.id = entries[0][0]
-            
-    @Bind.store("logins", ["date", "userid", "success"])
-    def set(self, date, userid, success):
-        if date:
-            self.date = date
-        if userid:
-            self.userid = userid
-        if success:
-            self.success = success
-
-    @Bind.load("logins",  ["date", "userid", "success"])
-    def get(self):
-        return (self.date, self.userid, self.success)
-
-class User(metaclass=Sqlize):
-    def __init__(self, name, phone, email, password, salt=None): # salt included so it will be in database
-        self.name = name
-        self.phone = phone
-        self.email = email
-        self.salt = secrets.token_hex(16)
-        self.password = hashlib.sha256((password + self.salt).encode()).hexdigest()
-        
-        entries = User.entries("users", [('name',name),('phone',phone)])
-        # create the user in db if name, phone pair doesn't exist
-        if not entries or entries == []:
-            self.id, _ = User.insert("users", [('name',name),('phone',phone),('email',email),('password',self.password),('salt',self.salt)])
-        else:
-            self.id = entries[0][0]
-
-    @Bind.load("users", ["salt", "password"])
-    def login(self, password):
-        match = self.password == hashlib.sha256((password + self.salt).encode()).hexdigest()
-        return Login( time.time_ns(), self.id, match )
-
-    @Bind.store("users", ["name"])
-    def set_name(self, name):
-        self.name = name
-
-    @Bind.load("users", ["name"])
-    def get_name(self):
-        return self.name
-
-    @Bind.store("users", ["phone"])
-    def set_phone(self, phone):
-        self.phone = phone
-    
-    @Bind.load("users", ["phone"])
-    def get_phone(self):
-        return self.phone
-
-    @Bind.store("users", ["name", "phone", "email"])
-    def set(self, name, phone, email):
-        self.name = name
-        self.phone = phone
-        self.email = email
-
-    @Bind.load("users", ["name", "phone", "email"])
-    def get(self):
-        return (self.name, self.phone, self.email)
-        
-
-n = User("H", 9783878782, "bob@example.com","temp")
-n.set("A", 44, "bill@example.com")
-print(n.get_name())
-print(n.id)
-n.set("Assy", 5551212, "andy@gmail.com")
-print(n.get())
-m = User("PP", 5551122, "pp@example.com", "another")
-l = Login("12/11/12", "1", "0")
-
-user_list = User.items()
-
-while True:
-    do = input("Would you like to (s)how all table names, (p)rint a table, (l)ookup something, log(o)n, (u)pdate, (q)uit\n")
-    try:
-        match do.lower():
-            case 's': 
-                print(User.show_tables())
-            case 'p':
-                table_name = input("Input table name\n") 
-                print(User.table(table_name))
-            case 'l':
-                table_name = input("Input table name\n") 
-                where = input("write your statement as column=value,column2=value2\n")
-                keyvals = [(s[0], s[1]) for s in [str.split("=") for str in where.split(",")]]
-                print(User.entries('users', keyvals))
-            case 'u':
-                table_name = input("Input table name\n")
-                commasep = input("Input three comma separated fields\n")
-                if table_name == "users":
-                    result = User( *commasep.split(","), )
-                if table_name == "logins":
-                    result = Login( *commasep.split(","), )
-                print( result )
-            case 'o':
-                username = input("Enter the username\n")
-                password = input("Enter the password\n")
-                for user in user_list:
-                    if user.get_name() == username:
-                        login = user.login(password)
-                        print(f"Attempted login on {login.date} with userid {login.userid}. Success: {login.success}")
-                        
-            case 'q':
-                exit()
-    except sqlite3.OperationalError:
-        print("Continueing after SQL error")
