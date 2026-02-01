@@ -17,25 +17,30 @@ and updates can be pushed automatically with the use of the Bind class
 
 OR
 
-Use AtomicSqlTable to 
+Use AtomicSqlTable to make/update/search tables with very little code
+usage:
+my_table = AtomicSqlTable("name_of_table", ('field', 'TYPE', ...), BooleanValue )   Boolean is True to override the table if it exists
+I'm going to change that to modify table in the near future (so you wont lose your data)
 """
 class Atomic(type):
-    _database = None
+    _database : sqlite3.Connection = None
+    _cursor : sqlite3.Cursor = None
     def __new__(cls, name, bases, dct):
         if not cls._database:
-            cls._database = sqlite3.connect(DB_NAME)    
+            cls._database = sqlite3.connect(DB_NAME)
+            cls._cursor = cls._database.cursor()    
         return super().__new__(cls, name, bases, dct)
     
     @classmethod
-    def query(cls, query, params=None):
-        cursor = cls._database.cursor()
+    def query(cls, query, params=None, lastRowId=False):
         if params:
-            cursor.execute(query, params)
+            cls._cursor.execute(query, params)
         else:
-            cursor.execute(query)
-        result = cursor.fetchall()
-        cursor.close()
-        return result
+            cls._cursor.execute(query)
+        if lastRowId:
+            return cls._cursor.lastrowid
+        else:
+            return cls._cursor.fetchall()
     
 class AtomicSqlTable(metaclass=Atomic):
     def __init__(self, table, fields, replace=False):
@@ -64,27 +69,37 @@ class AtomicSqlTable(metaclass=Atomic):
     def new(self, keyvals):
         _, params, keys, qmarks = self.valuesAndParams(keyvals)
         query = f'INSERT OR IGNORE INTO {self.table} ({keys}) VALUES ({qmarks})'
-        return self.__class__.query(query, params)
+        return self.__class__.query(query, params, lastRowId=True)
 
     def update(self, id, key, value):
         query = f'UPDATE {self.table} SET {key}=? WHERE id = ?'
         result = self.__class__.query(query, (value, id))
         return result
     
+    ''' called with either an id or keyvals for a while statement'''
     def get(self, id=None, keyvals=None):
         if id:
             query = f'SELECT * FROM {self.table} WHERE id=?'
-            return self.query(query, (id))
+            return self.__class__.query(query, (int(id),))
         elif keyvals:
             where, params, _, _ = self.valuesAndParams(keyvals)
             query = f'SELECT * FROM {self.table} WHERE {where}'
             return self.__class__.query(query, params)
-        
+
+    # for 'id' as a key, return exactly the one result
+    # for a dict of fields and their values, return None for 0 results, exactly one for 1 result, or a list for many results    
     def __getitem__(self, key):
         if isinstance(key,int):
-            return self.get(id=key,keyvals=None)
+            result = self.get(id=key,keyvals=None)
+            return result[0]
         elif isinstance(key,dict):
-            return self.get(id=None,keyvals=key)
+            result = self.get(id=None,keyvals=key)
+            if len(result) == 0:
+                return None
+            elif len(result) == 1:
+                return result[0]
+            else:
+                return result
         else:
             raise TypeError(f"Expected int or dict as argument, {type(key)} received")
 
