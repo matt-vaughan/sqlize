@@ -1,11 +1,11 @@
 import time
-from sqlize import AtomicDatabase, AtomicSqlTable
+from sqlize import AtomicDatabase
 """
 This is an example of how to use my AtomicSqlTable class...
 if you want to use this, let me know at mvaughan404@gmail.com
 I'm much more likely to support this repo if it's getting some use
 """
-# connect to my database
+# connect to or create my database
 db = AtomicDatabase('tests.db')
 # create my four tables
 lolly = db.table("Lollys", [('variety','TEXT'), ('color','TEXT'),('number','INT')], True)
@@ -13,7 +13,7 @@ order = db.table("Orders", [('date', 'INT'),('user_id', 'INT')], True)
 purchase = db.table("Purchases",[('lolly_id', 'INT'),('quantity','INT'),('order_id', 'INT')], True )
 user = db.table("Users", [('name','TEXT'),('email','TEXT')], True)
 
-# create four lollys for sale
+# create four new rows on table lolly, with lolly pops for sale
 l1 = lolly.new({'variety' : 'round', 'color' : 'blue', 'number' : 5})
 l2 = lolly.new({'variety' : 'square', 'color' : 'blue', 'number' : 10})
 l3 = lolly.new({'variety' : 'big', 'color' : 'red', 'number' : 15})
