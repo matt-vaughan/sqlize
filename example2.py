@@ -1,11 +1,17 @@
 import time
-from sqlize import AtomicSqlTable
-
+from sqlize import AtomicDatabase, AtomicSqlTable
+"""
+This is an example of how to use my AtomicSqlTable class...
+if you want to use this, let me know at mvaughan404@gmail.com
+I'm much more likely to support this repo if it's getting some use
+"""
+# connect to my database
+db = AtomicDatabase('tests.db')
 # create my four tables
-lolly = AtomicSqlTable("Lollys", [('variety','TEXT'), ('color','TEXT'),('number','INT')], True)
-order = AtomicSqlTable("Orders", [('date', 'INT'),('user_id', 'INT')], True)
-purchase = AtomicSqlTable("Purchases",[('lolly_id', 'INT'),('quantity','INT'),('order_id', 'INT')], True )
-user = AtomicSqlTable("Users", [('name','TEXT'),('email','TEXT')], True)
+lolly = db.table("Lollys", [('variety','TEXT'), ('color','TEXT'),('number','INT')], True)
+order = db.table("Orders", [('date', 'INT'),('user_id', 'INT')], True)
+purchase = db.table("Purchases",[('lolly_id', 'INT'),('quantity','INT'),('order_id', 'INT')], True )
+user = db.table("Users", [('name','TEXT'),('email','TEXT')], True)
 
 # create four lollys for sale
 l1 = lolly.new({'variety' : 'round', 'color' : 'blue', 'number' : 5})
@@ -29,7 +35,7 @@ print( "Getting the lolly with id=1", lolly[1] )
 print( "Getting the order and finding the items in it")
 o_id, o_date, o_user = order[o1]
 ps = purchase.get(id=None, keyvals={'order_id' : o_id})
-print("order id ", o_id," user_id ", o_user, "\n", ps)
+print("order id ", o_id," user_id ", o_user," who is ",u1, "\n", ps)
 print("updating a quantity")
 purchase.update(ps[0][0], 'quantity', 20)
-print( purchase[ps[0][0]] )
+print( purchase[ps[0][0]] ),

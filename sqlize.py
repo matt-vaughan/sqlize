@@ -22,42 +22,58 @@ usage:
 my_table = AtomicSqlTable("name_of_table", ('field', 'TYPE', ...), BooleanValue )   Boolean is True to override the table if it exists
 I'm going to change that to modify table in the near future (so you wont lose your data)
 """
-class Atomic(type):
-    _database : sqlite3.Connection = None
-    _cursor : sqlite3.Cursor = None
-    def __new__(cls, name, bases, dct):
-        if not cls._database:
-            cls._database = sqlite3.connect(DB_NAME)
-            cls._cursor = cls._database.cursor()    
-        return super().__new__(cls, name, bases, dct)
-    
-    @classmethod
-    def query(cls, query, params=None, lastRowId=False):
+class Atomic:
+    def __init__(self, database : sqlite3.Connection):
+        self._cursor = database.cursor()
+
+    def query(self, query, params=None, lastRowId=False):
         if params:
-            cls._cursor.execute(query, params)
+            self._cursor.execute(query, params)
         else:
-            cls._cursor.execute(query)
+            self._cursor.execute(query)
         if lastRowId:
-            return cls._cursor.lastrowid
+            return self._cursor.lastrowid
         else:
-            return cls._cursor.fetchall()
+            return self._cursor.fetchall()
+
+class AtomicDatabase(Atomic):
+    def __init__(self, database : str):
+        self._database = sqlite3.connect(database)
+        super().__init__(self._database)
+        self._tables : list[AtomicSqlTable] = []
+
+    def __getitem__(self, name):
+        for table in self._tables:
+            if table.name == name:
+                return table
+        return None
+            
+    def table(self, name, fields=None, replace=False):
+        if self[name]:
+            return self[name]
+        
+        if not fields: 
+            fields = ()
+        table = AtomicSqlTable(self._database, name, fields, replace)
+        self._tables.append(table)
+        return table
     
-class AtomicSqlTable(metaclass=Atomic):
-    def __init__(self, table, fields, replace=False):
-        self.table = table
+class AtomicSqlTable(Atomic):
+    def __init__(self, database :sqlite3.Connection, name, fields, replace=False):
+        super().__init__(database)
+        self.name = name
         self.fields = fields
-        cursor = self.__class__._database.cursor()
         
         if replace:
-            self.__class__.query(f'DROP TABLE IF EXISTS {table}')
+            self.query(f'DROP TABLE IF EXISTS {name}')
 
         query = f'''
-        CREATE TABLE IF NOT EXISTS {table} (
+        CREATE TABLE IF NOT EXISTS {name} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         {", ".join([f"{field} {type}" for field, type in fields])}
         )
         '''
-        self.__class__.query(query, ())
+        self.query(query, ())
 
     def valuesAndParams(self, keyvals : dict):
         where = " AND ".join([f"{k}=?" for k in keyvals.keys()])
@@ -68,23 +84,23 @@ class AtomicSqlTable(metaclass=Atomic):
     
     def new(self, keyvals):
         _, params, keys, qmarks = self.valuesAndParams(keyvals)
-        query = f'INSERT OR IGNORE INTO {self.table} ({keys}) VALUES ({qmarks})'
-        return self.__class__.query(query, params, lastRowId=True)
+        query = f'INSERT OR IGNORE INTO {self.name} ({keys}) VALUES ({qmarks})'
+        return self.query(query, params, lastRowId=True)
 
     def update(self, id, key, value):
-        query = f'UPDATE {self.table} SET {key}=? WHERE id = ?'
-        result = self.__class__.query(query, (value, id))
+        query = f'UPDATE {self.name} SET {key}=? WHERE id = ?'
+        result = self.query(query, (value, id))
         return result
     
     ''' called with either an id or keyvals for a while statement'''
     def get(self, id=None, keyvals=None):
         if id:
-            query = f'SELECT * FROM {self.table} WHERE id=?'
-            return self.__class__.query(query, (int(id),))
+            query = f'SELECT * FROM {self.name} WHERE id=?'
+            return self.query(query, (int(id),))
         elif keyvals:
             where, params, _, _ = self.valuesAndParams(keyvals)
-            query = f'SELECT * FROM {self.table} WHERE {where}'
-            return self.__class__.query(query, params)
+            query = f'SELECT * FROM {self.name} WHERE {where}'
+            return self.query(query, params)
 
     # for 'id' as a key, return exactly the one result
     # for a dict of fields and their values, return None for 0 results, exactly one for 1 result, or a list for many results    
